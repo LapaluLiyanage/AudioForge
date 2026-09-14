@@ -18,7 +18,11 @@ class ConverterTab(QWidget):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self._input_paths: list[str] = []
-        self._workers: list[ConvertWorker] = []
+        # Keep a strong reference to every running/finished worker (keyed by
+        # its row index) so Qt/Python never garbage-collects a ConvertWorker
+        # while its background thread is still executing. Pruned on
+        # completion/failure, mirroring DownloadTab._workers.
+        self._workers: dict[int, ConvertWorker] = {}
 
         self.format_combo = QComboBox()
         self.format_combo.addItems(["wav", "flac", "mp3", "m4a", "opus"])
@@ -90,14 +94,29 @@ class ConverterTab(QWidget):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        event.acceptProposedAction()
         paths = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
         self.add_files(paths)
 
     def _convert_all(self) -> None:
         fmt = self.format_combo.currentText()
         output_dir = self.output_dir_input.text().strip()
-        options = ConversionOptions(format=fmt, sample_rate=44100, bit_depth=16)
+        # Keep source sample rate / bit depth rather than hardcoding, so we
+        # (a) don't silently resample/downsample the user's own files, and
+        # (b) let converter.convert()'s skip-reencode fast path fire when the
+        # source already matches the requested format (e.g. opus -> opus).
+        options = ConversionOptions(format=fmt, sample_rate=None, bit_depth=None)
+        # Disable for the duration of the batch: a second click while workers
+        # are still running would start new ConvertWorkers against the same
+        # output paths concurrently, corrupting the output files.
+        self.convert_all_btn.setEnabled(False)
         for index, input_path in enumerate(self._input_paths):
+            # Skip rows already converted, in case _convert_all is invoked
+            # again (e.g. re-enabled after a batch) while some rows finished
+            # and others are still pending.
+            status_item = self.file_table.item(index, 1)
+            if status_item is not None and status_item.text() == "Done":
+                continue
             stem = os.path.splitext(os.path.basename(input_path))[0]
             if output_dir:
                 output_path = os.path.join(output_dir, f"{stem}_converted.{fmt}")
@@ -107,12 +126,33 @@ class ConverterTab(QWidget):
             worker = ConvertWorker(index, input_path, output_path, options)
             worker.finished_one.connect(self._on_finished_one)
             worker.failed_one.connect(self._on_failed_one)
-            self._workers.append(worker)
+            self._workers[index] = worker
             self.file_table.setItem(index, 1, QTableWidgetItem("Converting..."))
             worker.start()
+        # No workers were started (e.g. all rows already "Done") -- nothing
+        # will re-enable the button via a completion handler, so do it here.
+        if not self._workers:
+            self.convert_all_btn.setEnabled(True)
+
+    def _on_batch_worker_done(self, index: int) -> None:
+        self._workers.pop(index, None)
+        if not self._workers:
+            self.convert_all_btn.setEnabled(True)
 
     def _on_finished_one(self, index: int, output_path: str) -> None:
         self.file_table.setItem(index, 1, QTableWidgetItem("Done"))
+        self._on_batch_worker_done(index)
 
     def _on_failed_one(self, index: int, message: str) -> None:
         self.file_table.setItem(index, 1, QTableWidgetItem(f"Failed: {message[:60]}"))
+        self._on_batch_worker_done(index)
+
+    def shutdown(self) -> None:
+        """Give any still-running workers a brief chance to finish before the
+        window closes. Called from MainWindow.closeEvent -- destroying a
+        QThread while it's still running aborts with a Qt warning, so we wait
+        (with a timeout) rather than dropping references immediately.
+        """
+        for worker in list(self._workers.values()):
+            if worker.isRunning():
+                worker.wait(3000)

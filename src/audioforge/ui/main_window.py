@@ -20,7 +20,8 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.download_tab = DownloadTab(db_conn=self.db_conn)
         self.tabs.addTab(self.download_tab, "Download")
-        self.tabs.addTab(ConverterTab(), "Convert")
+        self.converter_tab = ConverterTab()
+        self.tabs.addTab(self.converter_tab, "Convert")
         self.setCentralWidget(self.tabs)
 
         self._build_menu()
@@ -38,5 +39,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.download_tab.shutdown()
+        self.converter_tab.shutdown()
         self.db_conn.close()
         event.accept()
