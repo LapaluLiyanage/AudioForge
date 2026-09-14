@@ -53,18 +53,18 @@ def convert(
     process = subprocess.Popen(
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
-    stderr_lines: list[str] = []
-    if process.stdout is not None:
-        for line in process.stdout:
-            if on_progress and line.startswith("out_time_ms="):
-                pass  # duration-based percent is computed by the caller, which knows total duration
-    if process.stderr is not None:
-        stderr_lines = process.stderr.readlines()
-    process.wait()
+    # Use communicate() to read stdout/stderr concurrently rather than draining
+    # one pipe fully before the other. FFmpeg writes both streams at the same
+    # time; reading them sequentially can deadlock once the OS pipe buffer for
+    # the unread stream fills up (most likely exactly when ffmpeg is emitting
+    # a lot of stderr output, e.g. on a failing conversion).
+    # TODO: on_progress is not yet wired to real progress — duration-based
+    # percent will be computed by the caller in a later task.
+    stdout, stderr = process.communicate()
 
     if process.returncode != 0:
         raise ConversionError(
-            f"FFmpeg exited with code {process.returncode}: {''.join(stderr_lines)[-2000:]}"
+            f"FFmpeg exited with code {process.returncode}: {stderr[-2000:]}"
         )
 
     return ConversionResult(output_path=output_path, skipped_reencode=False)
