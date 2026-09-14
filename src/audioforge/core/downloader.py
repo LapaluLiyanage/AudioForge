@@ -1,6 +1,8 @@
 """yt-dlp wrapper: metadata probing and raw audio download."""
 from __future__ import annotations
 
+import subprocess
+import sys
 from collections.abc import Callable
 
 import yt_dlp
@@ -65,3 +67,14 @@ def download_audio(
     if "path" not in downloaded_path:
         raise DownloadError("Download finished but no output file was reported by yt-dlp.")
     return downloaded_path["path"]
+
+
+def update_ytdlp() -> str:
+    """Upgrade yt-dlp via pip. Returns pip's stdout (contains the new version)."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise DownloadError(f"Failed to update yt-dlp: {result.stderr[-500:]}")
+    return result.stdout

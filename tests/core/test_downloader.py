@@ -1,8 +1,9 @@
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from audioforge.core.downloader import download_audio, probe
+from audioforge.core.downloader import download_audio, probe, update_ytdlp
 from audioforge.core.models import DownloadError, TrackMetadata
 
 SINGLE_INFO = {
@@ -124,3 +125,18 @@ def test_download_audio_raises_when_no_finished_hook_fired(mock_ydl_cls):
 
     with pytest.raises(DownloadError, match="no output file was reported"):
         download_audio("https://youtube.com/watch?v=abc123", "/tmp/some")
+
+
+@patch("audioforge.core.downloader.subprocess.run")
+def test_update_ytdlp_runs_pip_upgrade(mock_run):
+    mock_run.return_value.returncode = 0
+    mock_run.return_value.stdout = "Successfully installed yt-dlp-2024.9.1"
+
+    result = update_ytdlp()
+
+    args = mock_run.call_args[0][0]
+    assert args[0] == sys.executable
+    assert args[1:4] == ["-m", "pip", "install"]
+    assert "--upgrade" in args
+    assert "yt-dlp" in args
+    assert "2024.9.1" in result
