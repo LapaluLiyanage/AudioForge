@@ -27,6 +27,15 @@ VALID_STATUSES = {"queued", "downloading", "converting", "tagging", "done", "fai
 
 
 def connect(db_path: str) -> sqlite3.Connection:
+    """Open (and if needed, create) the job queue database at ``db_path``.
+
+    The returned connection is owned by the thread that called ``connect()``.
+    Background workers (e.g. future QThread-based download/convert workers)
+    must NOT be handed this connection directly — sqlite3 connections are not
+    safe to share across threads by default. Workers should report progress
+    and status via Qt signals and let the connection-owning thread (the
+    main/UI thread) perform the actual queue_db reads/writes.
+    """
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     init_schema(conn)
@@ -76,11 +85,13 @@ def update_status(
 ) -> None:
     if status not in VALID_STATUSES:
         raise ValueError(f"Invalid status: {status!r}. Must be one of {sorted(VALID_STATUSES)}")
-    conn.execute(
+    cursor = conn.execute(
         """UPDATE jobs SET status = ?, output_path = COALESCE(?, output_path),
            error_message = ?, updated_at = ? WHERE id = ?""",
         (status, output_path, error_message, _now(), job_id),
     )
+    if cursor.rowcount == 0:
+        raise ValueError(f"No job with id {job_id}")
     conn.commit()
 
 
@@ -91,7 +102,7 @@ def retry_job(conn: sqlite3.Connection, job_id: int) -> None:
     if job["status"] != "failed":
         raise ValueError(f"Job {job_id} is not failed (status={job['status']!r}); cannot retry")
     conn.execute(
-        """UPDATE jobs SET status = 'queued', error_message = NULL,
+        """UPDATE jobs SET status = 'queued', error_message = NULL, output_path = NULL,
            retry_count = retry_count + 1, updated_at = ? WHERE id = ?""",
         (_now(), job_id),
     )
