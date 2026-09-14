@@ -1,6 +1,9 @@
 import sqlite3
 
-from audioforge.core.queue_db import init_schema
+import pytest
+
+from audioforge.core.models import ConversionOptions
+from audioforge.core.queue_db import connect, enqueue, get_job, init_schema, list_jobs, update_status
 
 
 def test_init_schema_creates_jobs_table():
@@ -15,3 +18,40 @@ def test_init_schema_is_idempotent():
     conn = sqlite3.connect(":memory:")
     init_schema(conn)
     init_schema(conn)  # must not raise
+
+
+@pytest.fixture
+def conn():
+    return connect(":memory:")
+
+
+def test_enqueue_and_get_job(conn):
+    opts = ConversionOptions(format="flac", sample_rate=44100, bit_depth=16)
+    job_id = enqueue(conn, "https://youtube.com/watch?v=x", "ClientA", opts)
+
+    job = get_job(conn, job_id)
+
+    assert job["url"] == "https://youtube.com/watch?v=x"
+    assert job["status"] == "queued"
+    assert job["project_name"] == "ClientA"
+
+
+def test_list_jobs_filters_by_status(conn):
+    opts = ConversionOptions(format="mp3", sample_rate=44100, bit_depth=None)
+    id1 = enqueue(conn, "url1", "P", opts)
+    enqueue(conn, "url2", "P", opts)
+    update_status(conn, id1, "done", output_path="/out/1.mp3")
+
+    done_jobs = list_jobs(conn, status="done")
+    queued_jobs = list_jobs(conn, status="queued")
+
+    assert len(done_jobs) == 1
+    assert done_jobs[0]["output_path"] == "/out/1.mp3"
+    assert len(queued_jobs) == 1
+
+
+def test_update_status_rejects_invalid_status(conn):
+    opts = ConversionOptions(format="mp3", sample_rate=44100, bit_depth=None)
+    job_id = enqueue(conn, "url", "P", opts)
+    with pytest.raises(ValueError):
+        update_status(conn, job_id, "bogus")
