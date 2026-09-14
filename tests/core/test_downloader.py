@@ -55,6 +55,37 @@ def test_probe_raises_download_error_on_extractor_failure(mock_ydl_cls):
         probe("https://youtube.com/watch?v=deadbeef")
 
 
+@patch("audioforge.core.downloader.yt_dlp.YoutubeDL")
+def test_probe_raises_download_error_when_extract_info_returns_none(mock_ydl_cls):
+    mock_ydl = MagicMock()
+    mock_ydl.extract_info.return_value = None
+    mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+
+    with pytest.raises(DownloadError):
+        probe("https://youtube.com/watch?v=abc123")
+
+
+@patch("audioforge.core.downloader.yt_dlp.YoutubeDL")
+def test_probe_playlist_skips_none_and_incomplete_entries(mock_ydl_cls):
+    mock_ydl = MagicMock()
+    mock_ydl.extract_info.return_value = {
+        "_type": "playlist",
+        "entries": [
+            SINGLE_INFO,
+            None,
+            {**SINGLE_INFO, "id": None},
+            {**SINGLE_INFO, "id": "def456", "title": "Song 2"},
+        ],
+    }
+    mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+
+    result = probe("https://youtube.com/playlist?list=xyz")
+
+    assert isinstance(result, list)
+    assert len(result) == 2
+    assert [m.id for m in result] == ["abc123", "def456"]
+
+
 def _get_hook(mock_ydl_cls) -> callable:
     """Extract the real `_hook` closure passed as opts["progress_hooks"][0]."""
     args, kwargs = mock_ydl_cls.call_args
@@ -125,6 +156,17 @@ def test_download_audio_raises_when_no_finished_hook_fired(mock_ydl_cls):
 
     with pytest.raises(DownloadError, match="no output file was reported"):
         download_audio("https://youtube.com/watch?v=abc123", "/tmp/some")
+
+
+@patch("audioforge.core.downloader.yt_dlp.YoutubeDL")
+def test_download_audio_raises_download_error_on_extractor_failure(mock_ydl_cls):
+    import yt_dlp
+    mock_ydl = MagicMock()
+    mock_ydl.download.side_effect = yt_dlp.utils.DownloadError("Sign in to confirm your age")
+    mock_ydl_cls.return_value.__enter__.return_value = mock_ydl
+
+    with pytest.raises(DownloadError):
+        download_audio("https://youtube.com/watch?v=x", "/tmp/some")
 
 
 @patch("audioforge.core.downloader.subprocess.run")

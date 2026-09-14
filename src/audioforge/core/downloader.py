@@ -29,8 +29,11 @@ def probe(url: str) -> TrackMetadata | list[TrackMetadata]:
     except yt_dlp.utils.DownloadError as exc:
         raise DownloadError(str(exc)) from exc
 
+    if info is None:
+        raise DownloadError(f"yt-dlp returned no information for {url}.")
+
     if info.get("_type") == "playlist":
-        return [_to_metadata(entry) for entry in info["entries"]]
+        return [_to_metadata(entry) for entry in info["entries"] if entry and entry.get("id")]
     return _to_metadata(info)
 
 
