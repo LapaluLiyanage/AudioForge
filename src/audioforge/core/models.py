@@ -22,3 +22,17 @@ class ConversionResult:
 
 class ConversionError(Exception):
     """Raised when FFmpeg fails to convert a file."""
+
+
+@dataclass(frozen=True)
+class TrackMetadata:
+    id: str
+    title: str
+    uploader: str
+    duration_seconds: int
+    url: str
+    thumbnail_url: str | None = None
+
+
+class DownloadError(Exception):
+    """Raised when yt-dlp cannot probe or download a URL."""
