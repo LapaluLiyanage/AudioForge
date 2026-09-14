@@ -22,3 +22,12 @@ def test_resolve_output_path_dedupes_existing_file(tmp_path):
     path = resolve_output_path(str(tmp_path), "ClientA", make_meta("Track One"), "wav")
 
     assert path == str(tmp_path / "ClientA" / "Track One (2).wav")
+
+
+def test_resolve_output_path_creates_project_folder(tmp_path):
+    project_dir = tmp_path / "ClientA"
+    assert not project_dir.exists()
+
+    resolve_output_path(str(tmp_path), "ClientA", make_meta("Track One"), "wav")
+
+    assert project_dir.is_dir()

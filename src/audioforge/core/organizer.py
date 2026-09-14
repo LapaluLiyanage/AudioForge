@@ -17,6 +17,7 @@ def sanitize_filename(name: str) -> str:
 
 def resolve_output_path(base_dir: str, project_name: str, metadata: TrackMetadata, format: str) -> str:
     folder = os.path.join(base_dir, sanitize_filename(project_name))
+    os.makedirs(folder, exist_ok=True)
     stem = sanitize_filename(metadata.title)
     candidate = os.path.join(folder, f"{stem}.{format}")
 
