@@ -9,7 +9,10 @@ from audioforge.ui.theme import DARK_STYLESHEET
 
 
 def main() -> int:
-    app = QApplication(sys.argv)
+    # Reuse an existing QApplication instance if one is already running (e.g.
+    # under pytest-qt, which creates one for the test session) rather than
+    # constructing a second one, which PySide6 refuses.
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setStyleSheet(DARK_STYLESHEET)
     if not show_disclaimer_if_needed():
         return 0
