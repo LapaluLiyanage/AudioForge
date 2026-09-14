@@ -4,6 +4,7 @@ from PySide6.QtWidgets import QMainWindow, QTabWidget
 
 from audioforge import config
 from audioforge.core import queue_db
+from audioforge.ui.converter_tab import ConverterTab
 from audioforge.ui.download_tab import DownloadTab
 from audioforge.ui.settings_dialog import SettingsDialog
 
@@ -19,6 +20,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.download_tab = DownloadTab(db_conn=self.db_conn)
         self.tabs.addTab(self.download_tab, "Download")
+        self.tabs.addTab(ConverterTab(), "Convert")
         self.setCentralWidget(self.tabs)
 
         self._build_menu()
