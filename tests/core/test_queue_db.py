@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 
 from audioforge.core.models import ConversionOptions
-from audioforge.core.queue_db import connect, enqueue, get_job, init_schema, list_jobs, update_status
+from audioforge.core.queue_db import connect, enqueue, get_job, init_schema, list_jobs, update_status, retry_job
 
 
 def test_init_schema_creates_jobs_table():
@@ -55,3 +55,23 @@ def test_update_status_rejects_invalid_status(conn):
     job_id = enqueue(conn, "url", "P", opts)
     with pytest.raises(ValueError):
         update_status(conn, job_id, "bogus")
+
+
+def test_retry_job_resets_status_and_increments_count(conn):
+    opts = ConversionOptions(format="mp3", sample_rate=44100, bit_depth=None)
+    job_id = enqueue(conn, "url", "P", opts)
+    update_status(conn, job_id, "failed", error_message="network error")
+
+    retry_job(conn, job_id)
+
+    job = get_job(conn, job_id)
+    assert job["status"] == "queued"
+    assert job["retry_count"] == 1
+    assert job["error_message"] is None
+
+
+def test_retry_job_raises_if_not_failed(conn):
+    opts = ConversionOptions(format="mp3", sample_rate=44100, bit_depth=None)
+    job_id = enqueue(conn, "url", "P", opts)  # still queued
+    with pytest.raises(ValueError):
+        retry_job(conn, job_id)

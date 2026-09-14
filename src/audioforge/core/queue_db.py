@@ -82,3 +82,17 @@ def update_status(
         (status, output_path, error_message, _now(), job_id),
     )
     conn.commit()
+
+
+def retry_job(conn: sqlite3.Connection, job_id: int) -> None:
+    job = get_job(conn, job_id)
+    if job is None:
+        raise ValueError(f"No job with id {job_id}")
+    if job["status"] != "failed":
+        raise ValueError(f"Job {job_id} is not failed (status={job['status']!r}); cannot retry")
+    conn.execute(
+        """UPDATE jobs SET status = 'queued', error_message = NULL,
+           retry_count = retry_count + 1, updated_at = ? WHERE id = ?""",
+        (_now(), job_id),
+    )
+    conn.commit()
