@@ -1,3 +1,4 @@
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
@@ -9,9 +10,9 @@ from audioforge.workers.download_worker import DownloadWorker
 
 LOSSLESS_FORMATS = {"wav", "flac"}
 
-# There is no per-download project-name picker in the UI yet (out of scope for
-# this task); every job is organized under this single default project
-# subfolder until sub-plan work adds that control.
+# Used as the project name / output dir fallback whenever the corresponding
+# QSettings key (written by SettingsDialog) is unset or empty -- e.g. before
+# the user has ever opened Settings.
 DEFAULT_PROJECT_NAME = "Default"
 
 _COL_TITLE = 0
@@ -60,6 +61,12 @@ class DownloadTab(QWidget):
         layout.addLayout(top_row)
         layout.addWidget(self.queue_table)
 
+        default_format = QSettings("AudioForge", "AudioForge").value("default_format", "")
+        if default_format:
+            index = self.format_combo.findText(default_format)
+            if index >= 0:
+                self.format_combo.setCurrentIndex(index)
+
         self._on_format_changed(self.format_combo.currentText())
 
     def _on_url_changed(self, text: str) -> None:
@@ -80,7 +87,11 @@ class DownloadTab(QWidget):
             return
         options = self._current_options()
 
-        job_id = queue_db.enqueue(self.db_conn, url, DEFAULT_PROJECT_NAME, options)
+        settings = QSettings("AudioForge", "AudioForge")
+        project_name = settings.value("default_project_name", "") or DEFAULT_PROJECT_NAME
+        base_output_dir = settings.value("output_base_dir", "") or config.get_default_output_dir()
+
+        job_id = queue_db.enqueue(self.db_conn, url, project_name, options)
 
         row = self.queue_table.rowCount()
         self.queue_table.insertRow(row)
@@ -93,18 +104,28 @@ class DownloadTab(QWidget):
         worker = DownloadWorker(
             job_id=job_id,
             url=url,
-            project_name=DEFAULT_PROJECT_NAME,
+            project_name=project_name,
             options=options,
-            base_output_dir=config.get_default_output_dir(),
+            base_output_dir=base_output_dir,
         )
         worker.progress.connect(self._on_worker_progress)
         worker.status_changed.connect(self._on_worker_status_changed)
-        worker.finished.connect(self._on_worker_finished)
+        worker.job_finished.connect(self._on_worker_finished)
         worker.failed.connect(self._on_worker_failed)
         self._workers[job_id] = worker
 
         self.url_input.clear()
         worker.start()
+
+    def shutdown(self) -> None:
+        """Give any still-running workers a brief chance to finish before the
+        window closes. Called from MainWindow.closeEvent -- destroying a
+        QThread while it's still running aborts with a Qt warning, so we wait
+        (with a timeout) rather than dropping references immediately.
+        """
+        for worker in list(self._workers.values()):
+            if worker.isRunning():
+                worker.wait(3000)
 
     def _set_row_text(self, job_id: int, column: int, text: str) -> None:
         row = self._job_rows.get(job_id)
@@ -121,16 +142,18 @@ class DownloadTab(QWidget):
 
     def _on_worker_status_changed(self, job_id: int, status: str) -> None:
         # No output_path here by design: the "done" status_changed emission
-        # always precedes/accompanies a separate `finished` signal that
+        # always precedes/accompanies a separate `job_finished` signal that
         # carries the output_path (see DownloadWorker). update_status's
         # COALESCE(?, output_path) means this call never clobbers a path
-        # already written by the `finished` handler below.
+        # already written by the `job_finished` handler below.
         queue_db.update_status(self.db_conn, job_id, status)
         self._set_row_text(job_id, _COL_STATUS, status)
 
     def _on_worker_finished(self, job_id: int, output_path: str) -> None:
         queue_db.update_status(self.db_conn, job_id, "done", output_path=output_path)
+        self._workers.pop(job_id, None)
 
     def _on_worker_failed(self, job_id: int, message: str) -> None:
         queue_db.update_status(self.db_conn, job_id, "failed", error_message=message)
         self._set_row_text(job_id, _COL_STATUS, "failed")
+        self._workers.pop(job_id, None)

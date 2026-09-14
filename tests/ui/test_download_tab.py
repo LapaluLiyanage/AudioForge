@@ -1,5 +1,7 @@
 from unittest.mock import MagicMock, patch
 
+from PySide6.QtCore import QSettings
+
 from audioforge.core import queue_db
 from audioforge.ui.download_tab import DownloadTab
 
@@ -62,6 +64,30 @@ def test_add_to_queue_enqueues_job_and_starts_worker(mock_worker_cls, tmp_path, 
 
 
 @patch("audioforge.ui.download_tab.DownloadWorker")
+def test_add_to_queue_uses_settings_project_name_and_output_dir(mock_worker_cls, tmp_path, qtbot):
+    mock_worker = MagicMock()
+    mock_worker_cls.return_value = mock_worker
+
+    settings = QSettings("AudioForge", "AudioForge")
+    settings.setValue("default_project_name", "MyProject")
+    settings.setValue("output_base_dir", str(tmp_path / "custom_out"))
+    try:
+        tab, conn = _make_tab_with_db(tmp_path, qtbot)
+        qtbot.keyClicks(tab.url_input, "https://youtube.com/watch?v=abc")
+
+        tab._on_add_to_queue()
+
+        jobs = queue_db.list_jobs(conn)
+        assert jobs[0]["project_name"] == "MyProject"
+        _, kwargs = mock_worker_cls.call_args
+        assert kwargs["project_name"] == "MyProject"
+        assert kwargs["base_output_dir"] == str(tmp_path / "custom_out")
+    finally:
+        settings.remove("default_project_name")
+        settings.remove("output_base_dir")
+
+
+@patch("audioforge.ui.download_tab.DownloadWorker")
 def test_status_changed_updates_queue_db_and_table(mock_worker_cls, tmp_path, qtbot):
     mock_worker_cls.return_value = MagicMock()
     tab, conn = _make_tab_with_db(tmp_path, qtbot)
@@ -84,10 +110,15 @@ def test_worker_finished_persists_output_path(mock_worker_cls, tmp_path, qtbot):
     tab._on_add_to_queue()
     job_id = queue_db.list_jobs(conn)[0]["id"]
 
+    assert job_id in tab._workers
+
     tab._on_worker_finished(job_id, "/out/P/Track.flac")
 
     job = queue_db.get_job(conn, job_id)
     assert job["output_path"] == "/out/P/Track.flac"
+    # _workers must be pruned on completion so it doesn't grow unbounded for
+    # the lifetime of a long session.
+    assert job_id not in tab._workers
 
 
 @patch("audioforge.ui.download_tab.DownloadWorker")
@@ -98,6 +129,8 @@ def test_worker_failed_updates_queue_db_and_table(mock_worker_cls, tmp_path, qtb
     tab._on_add_to_queue()
     job_id = queue_db.list_jobs(conn)[0]["id"]
 
+    assert job_id in tab._workers
+
     tab._on_worker_failed(job_id, "boom")
 
     job = queue_db.get_job(conn, job_id)
@@ -105,3 +138,6 @@ def test_worker_failed_updates_queue_db_and_table(mock_worker_cls, tmp_path, qtb
     assert job["error_message"] == "boom"
     row = tab._job_rows[job_id]
     assert tab.queue_table.item(row, 2).text() == "failed"
+    # _workers must be pruned on completion (failure counts as completion)
+    # so it doesn't grow unbounded for the lifetime of a long session.
+    assert job_id not in tab._workers
