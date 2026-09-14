@@ -9,6 +9,9 @@ description = "Desktop audio downloader & converter for music production studios
 requires-python = ">=3.11"
 authors = [{ name = "Lapalu Liyanage" }]
 
+[project.optional-dependencies]
+build = ["pyinstaller>=6.0"]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
