@@ -56,7 +56,7 @@ def test_update_engine_button_starts_worker_without_blocking(mock_worker_cls, qt
     dialog._on_update_engine_clicked()
 
     mock_worker_cls.assert_called_once()
-    mock_worker.finished.connect.assert_called_once()
+    mock_worker.update_finished.connect.assert_called_once()
     mock_worker.start.assert_called_once()
     assert dialog._update_worker is mock_worker
 

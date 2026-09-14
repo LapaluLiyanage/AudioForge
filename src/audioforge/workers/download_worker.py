@@ -35,7 +35,11 @@ class DownloadWorker(QThread):
     # queue_db.update_status(..., output_path=...). status_changed alone never
     # carries output_path, so without this signal the queue_db "done" row's
     # output_path would stay NULL forever.
-    finished = Signal(int, str)
+    # Named job_finished (not `finished`) because QThread already defines its
+    # own `finished` signal; reusing that name would shadow the inherited one
+    # and make the standard worker.finished.connect(worker.deleteLater)
+    # cleanup idiom unavailable on this subclass.
+    job_finished = Signal(int, str)
     failed = Signal(int, str)
 
     def __init__(self, job_id: int, url: str, project_name: str, options: ConversionOptions, base_output_dir: str):
@@ -81,7 +85,7 @@ class DownloadWorker(QThread):
                 self.status_changed.emit(self.job_id, "tagging")
                 write_tags(output_path, metadata, self.options.format, date.today().isoformat())
 
-            self.finished.emit(self.job_id, output_path)
+            self.job_finished.emit(self.job_id, output_path)
             self.status_changed.emit(self.job_id, "done")
         except Exception as exc:
             self.failed.emit(self.job_id, str(exc))

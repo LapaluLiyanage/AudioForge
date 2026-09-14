@@ -30,14 +30,18 @@ FORMAT_CHOICES = ["wav", "flac", "mp3", "m4a", "opus"]
 class EngineUpdateWorker(QThread):
     """Runs downloader.update_ytdlp() off the UI thread."""
 
-    finished = Signal(bool, str)
+    # Named update_finished (not `finished`) because QThread already defines
+    # its own `finished` signal; reusing that name would shadow the inherited
+    # one and make the standard worker.finished.connect(worker.deleteLater)
+    # cleanup idiom unavailable on this subclass.
+    update_finished = Signal(bool, str)
 
     def run(self) -> None:
         try:
             version_info = downloader.update_ytdlp()
-            self.finished.emit(True, version_info)
+            self.update_finished.emit(True, version_info)
         except Exception as exc:
-            self.finished.emit(False, str(exc))
+            self.update_finished.emit(False, str(exc))
 
 
 class SettingsDialog(QDialog):
@@ -101,7 +105,7 @@ class SettingsDialog(QDialog):
     def _on_update_engine_clicked(self) -> None:
         self.update_status_label.setText("Updating...")
         worker = EngineUpdateWorker()
-        worker.finished.connect(self._on_update_finished)
+        worker.update_finished.connect(self._on_update_finished)
         self._update_worker = worker
         worker.start()
 
