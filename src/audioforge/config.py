@@ -23,3 +23,17 @@ def get_db_path() -> str:
 
     os.makedirs(app_dir, exist_ok=True)
     return os.path.join(app_dir, DB_FILE_NAME)
+
+
+def get_default_output_dir() -> str:
+    """Return the default base directory downloaded/converted tracks are organized under.
+
+    Resolves to ``~/Music/AudioForge`` (or the OS equivalent of the user's
+    Music folder). Ensures the directory exists before returning. There is no
+    per-project output-directory picker in the UI yet, so all jobs currently
+    share this single base directory (sub-plan's ``resolve_output_path``
+    still nests each job under its ``project_name`` subfolder).
+    """
+    output_dir = os.path.join(os.path.expanduser("~"), "Music", APP_DIR_NAME)
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
