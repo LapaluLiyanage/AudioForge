@@ -71,6 +71,10 @@ class DownloadWorker(QThread):
         try:
             self.status_changed.emit(self.job_id, "downloading")
             metadata = probe(self.url)
+            if isinstance(metadata, list):
+                raise ValueError(
+                    "Playlist URLs are not supported yet — please paste a single video URL."
+                )
             with tempfile.TemporaryDirectory() as tmp_dir:
                 raw_path = download_audio(
                     self.url, tmp_dir, on_progress=lambda pct: self.progress.emit(self.job_id, pct)
