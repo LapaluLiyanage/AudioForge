@@ -36,3 +36,7 @@ class TrackMetadata:
 
 class DownloadError(Exception):
     """Raised when yt-dlp cannot probe or download a URL."""
+
+
+class TaggingError(Exception):
+    """Raised when mutagen cannot read/write metadata tags on an output file."""
