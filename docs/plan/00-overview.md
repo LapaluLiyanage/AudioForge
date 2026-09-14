@@ -85,4 +85,4 @@ AudioForge/
 
 Status tracking for each sub-plan lives in that sub-plan's own checkboxes — update this table only when a whole phase completes.
 
-**Phase status:** Phase 1 (environment setup) — in progress, started 2026-09-14.
+**Phase status:** Phases 1-4 (sub-plans 1-8) complete as of 2026-09-14, merged to main. Sub-plan 8's Inno Setup installer script is written and the PyInstaller build is verified working end-to-end on this machine, but the final installer .exe itself is unbuilt/untested — Inno Setup (ISCC.exe) is not installed here; see packaging/build.ps1. Phase 5 (studio pilot) is next.
