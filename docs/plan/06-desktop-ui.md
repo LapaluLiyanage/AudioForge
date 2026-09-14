@@ -12,6 +12,8 @@
 
 ## Global Constraints
 
+- **Carried forward from sub-plan 05's final review:** the `status_changed(int job_id, str status)` signal described above cannot carry an output path, so wiring it straight to `queue_db.update_status(conn, job_id, "done")` will leave every job's `output_path` NULL forever (breaks the queue view's output column and any "reveal in folder" action). Widen the signal (e.g. add a `finished(int job_id, str output_path)` signal, or change `status_changed` to carry an optional path) so `output_path` actually gets written on completion. Resolve this explicitly in this sub-plan's pre-flight conflict scan before Task 1 starts.
+- **Carried forward from sub-plan 05's final review:** `queue_db.connect()`'s returned `sqlite3.Connection` is owned by the thread that called it (see its docstring). `DownloadWorker` must NOT be handed that connection or open its own — it must report progress/status/completion via Qt signals only, and the connection-owning thread (main/UI thread) performs all `queue_db` writes in the slots connected to those signals.
 - No blocking calls on the Qt main thread — all yt-dlp/FFmpeg work happens inside `DownloadWorker(QThread)`.
 - First-run disclaimer (`disclaimer_dialog.py`) must block usage of the Download tab until accepted; store acceptance in `QSettings` so it only shows once.
 - Dark theme applied globally via a QSS stylesheet loaded once at `QApplication` startup — no per-widget inline styling.
