@@ -3,8 +3,8 @@ import os
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QHBoxLayout, QLabel, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from audioforge.core.models import ConversionOptions
@@ -28,6 +28,11 @@ class ConverterTab(QWidget):
         self.convert_all_btn.setEnabled(False)
         self.convert_all_btn.clicked.connect(self._convert_all)
 
+        self.output_dir_input = QLineEdit()
+        self.output_dir_input.setPlaceholderText("Output folder (default: next to source file)")
+        output_browse_btn = QPushButton("Browse...")
+        output_browse_btn.clicked.connect(self._browse_output_dir)
+
         self.file_table = QTableWidget(0, 2)
         self.file_table.setHorizontalHeaderLabels(["File", "Status"])
 
@@ -39,14 +44,22 @@ class ConverterTab(QWidget):
         top_row.addWidget(self.format_combo)
         top_row.addWidget(self.convert_all_btn)
 
+        output_row = QHBoxLayout()
+        output_row.addWidget(QLabel("Output folder:"))
+        output_row.addWidget(self.output_dir_input)
+        output_row.addWidget(output_browse_btn)
+
         layout = QVBoxLayout(self)
         layout.addWidget(drop_hint)
         layout.addLayout(top_row)
+        layout.addLayout(output_row)
         layout.addWidget(self.file_table)
 
     def add_files(self, paths: list[str]) -> None:
+        rejected: list[str] = []
         for path in paths:
             if os.path.splitext(path)[1].lower() not in AUDIO_EXTENSIONS:
+                rejected.append(os.path.basename(path))
                 continue
             self._input_paths.append(path)
             row = self.file_table.rowCount()
@@ -54,11 +67,23 @@ class ConverterTab(QWidget):
             self.file_table.setItem(row, 0, QTableWidgetItem(os.path.basename(path)))
             self.file_table.setItem(row, 1, QTableWidgetItem("Pending"))
         self.convert_all_btn.setEnabled(bool(self._input_paths))
+        if rejected:
+            QMessageBox.warning(
+                self,
+                "Unsupported files",
+                "The following files were not added because their format is not "
+                "supported:\n" + "\n".join(rejected),
+            )
 
     def _browse_files(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(self, "Choose audio files")
         if paths:
             self.add_files(paths)
+
+    def _browse_output_dir(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Choose output folder")
+        if path:
+            self.output_dir_input.setText(path)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
@@ -70,10 +95,15 @@ class ConverterTab(QWidget):
 
     def _convert_all(self) -> None:
         fmt = self.format_combo.currentText()
+        output_dir = self.output_dir_input.text().strip()
         options = ConversionOptions(format=fmt, sample_rate=44100, bit_depth=16)
         for index, input_path in enumerate(self._input_paths):
-            stem, _ = os.path.splitext(input_path)
-            output_path = f"{stem}_converted.{fmt}"
+            stem = os.path.splitext(os.path.basename(input_path))[0]
+            if output_dir:
+                output_path = os.path.join(output_dir, f"{stem}_converted.{fmt}")
+            else:
+                input_stem, _ = os.path.splitext(input_path)
+                output_path = f"{input_stem}_converted.{fmt}"
             worker = ConvertWorker(index, input_path, output_path, options)
             worker.finished_one.connect(self._on_finished_one)
             worker.failed_one.connect(self._on_failed_one)
