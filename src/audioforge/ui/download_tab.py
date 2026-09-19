@@ -1,84 +1,97 @@
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from audioforge import config
 from audioforge.core import queue_db
 from audioforge.core.models import ConversionOptions
+from audioforge.ui.queue_grid import QueueGrid
+from audioforge.ui.widgets import SegmentedRow, make_cta_button
 from audioforge.workers.download_worker import DownloadWorker
 
 LOSSLESS_FORMATS = {"wav", "flac"}
+
+FORMAT_OPTIONS = [("WAV", "wav"), ("FLAC", "flac"), ("MP3", "mp3")]
+QUALITY_OPTIONS = [("44.1/16", (44100, 16)), ("48/24", (48000, 24)), ("96/24", (96000, 24))]
 
 # Used as the project name / output dir fallback whenever the corresponding
 # QSettings key (written by SettingsDialog) is unset or empty -- e.g. before
 # the user has ever opened Settings.
 DEFAULT_PROJECT_NAME = "Default"
 
-_COL_TITLE = 0
-_COL_FORMAT = 1
-_COL_STATUS = 2
-_COL_PROGRESS = 3
-
 
 class DownloadTab(QWidget):
-    def __init__(self, db_conn, parent=None):
+    """The 'YouTube downloader' card in the right-hand panel."""
+
+    def __init__(self, db_conn, queue_grid: QueueGrid, parent=None):
         super().__init__(parent)
         self.db_conn = db_conn
+        self.queue_grid = queue_grid
         # Keep a strong reference to every running/finished worker so Qt/Python
         # never garbage-collects a DownloadWorker while its background thread
         # is still executing.
         self._workers: dict[int, DownloadWorker] = {}
-        # Maps job_id -> its row index in queue_table, so signal handlers can
-        # refresh the right row.
-        self._job_rows: dict[int, int] = {}
+        # Maps job_id -> its key in queue_grid, so signal handlers can refresh
+        # the right card.
+        self._job_keys: dict[int, str] = {}
+
+        card = QFrame()
+        card.setObjectName("card")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(18, 18, 18, 18)
+        card_layout.setSpacing(14)
+
+        title = QLabel("YouTube downloader")
+        title.setObjectName("cardTitle")
+        card_layout.addWidget(title)
+
+        url_label = QLabel("Paste a YouTube URL")
+        url_label.setObjectName("fieldLabel")
+        card_layout.addWidget(url_label)
 
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("Paste a YouTube URL...")
-        self.format_combo = QComboBox()
-        self.format_combo.addItems(["wav", "flac", "mp3", "m4a", "opus"])
-        self.sample_rate_combo = QComboBox()
-        self.sample_rate_combo.addItems(["44100", "48000", "96000"])
-        self.bit_depth_combo = QComboBox()
-        self.bit_depth_combo.addItems(["16", "24"])
-        self.add_to_queue_btn = QPushButton("Add to Queue")
-        self.add_to_queue_btn.setEnabled(False)
-        self.queue_table = QTableWidget(0, 4)
-        self.queue_table.setHorizontalHeaderLabels(["Title", "Format", "Status", "Progress"])
-
+        self.url_input.setPlaceholderText("https://youtube.com/watch?v=")
         self.url_input.textChanged.connect(self._on_url_changed)
-        self.format_combo.currentTextChanged.connect(self._on_format_changed)
-        self.add_to_queue_btn.clicked.connect(self._on_add_to_queue)
+        card_layout.addWidget(self.url_input)
 
-        top_row = QHBoxLayout()
-        top_row.addWidget(self.url_input)
-        top_row.addWidget(self.format_combo)
-        top_row.addWidget(self.sample_rate_combo)
-        top_row.addWidget(self.bit_depth_combo)
-        top_row.addWidget(self.add_to_queue_btn)
+        format_label = QLabel("Format")
+        format_label.setObjectName("fieldLabel")
+        card_layout.addWidget(format_label)
+        self.format_row = SegmentedRow(FORMAT_OPTIONS, default="wav")
+        card_layout.addWidget(self.format_row)
 
-        layout = QVBoxLayout(self)
-        layout.addLayout(top_row)
-        layout.addWidget(self.queue_table)
+        quality_label = QLabel("Quality")
+        quality_label.setObjectName("fieldLabel")
+        card_layout.addWidget(quality_label)
+        self.quality_row = SegmentedRow(QUALITY_OPTIONS, default=(44100, 16))
+        card_layout.addWidget(self.quality_row)
+
+        self.download_btn = make_cta_button("Download", primary=True)
+        self.download_btn.setEnabled(False)
+        self.download_btn.clicked.connect(self._on_add_to_queue)
+        card_layout.addWidget(self.download_btn)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(card)
 
         default_format = QSettings("AudioForge", "AudioForge").value("default_format", "")
         if default_format:
-            index = self.format_combo.findText(default_format)
-            if index >= 0:
-                self.format_combo.setCurrentIndex(index)
+            self.format_row.set_value(default_format)
 
-        self._on_format_changed(self.format_combo.currentText())
+    def _current_format(self) -> str:
+        return self.format_row.value()
+
+    def _current_quality(self) -> tuple[int, int]:
+        return self.quality_row.value()
 
     def _on_url_changed(self, text: str) -> None:
-        self.add_to_queue_btn.setEnabled(bool(text.strip()))
-
-    def _on_format_changed(self, fmt: str) -> None:
-        self.bit_depth_combo.setEnabled(fmt in LOSSLESS_FORMATS)
+        self.download_btn.setEnabled(bool(text.strip()))
 
     def _current_options(self) -> ConversionOptions:
-        fmt = self.format_combo.currentText()
-        sample_rate = int(self.sample_rate_combo.currentText())
-        bit_depth = int(self.bit_depth_combo.currentText()) if self.bit_depth_combo.isEnabled() else None
+        fmt = self._current_format()
+        sample_rate, bit_depth = self._current_quality()
+        if fmt not in LOSSLESS_FORMATS:
+            bit_depth = None
         return ConversionOptions(format=fmt, sample_rate=sample_rate, bit_depth=bit_depth)
 
     def _on_add_to_queue(self) -> None:
@@ -93,13 +106,13 @@ class DownloadTab(QWidget):
 
         job_id = queue_db.enqueue(self.db_conn, url, project_name, options)
 
-        row = self.queue_table.rowCount()
-        self.queue_table.insertRow(row)
-        self.queue_table.setItem(row, _COL_TITLE, QTableWidgetItem(url))
-        self.queue_table.setItem(row, _COL_FORMAT, QTableWidgetItem(options.format))
-        self.queue_table.setItem(row, _COL_STATUS, QTableWidgetItem("queued"))
-        self.queue_table.setItem(row, _COL_PROGRESS, QTableWidgetItem("0%"))
-        self._job_rows[job_id] = row
+        key = f"dl:{job_id}"
+        self._job_keys[job_id] = key
+        title = url.replace("https://", "").replace("http://", "").rstrip("/")
+        if len(title) > 42:
+            title = title[:42] + "…"
+        meta = f"{options.format} · {options.sample_rate}/{options.bit_depth or '-'} · queued"
+        self.queue_grid.add_item(key, title=title, meta=meta, status="queued")
 
         worker = DownloadWorker(
             job_id=job_id,
@@ -127,18 +140,11 @@ class DownloadTab(QWidget):
             if worker.isRunning():
                 worker.wait(3000)
 
-    def _set_row_text(self, job_id: int, column: int, text: str) -> None:
-        row = self._job_rows.get(job_id)
-        if row is None:
-            return
-        item = self.queue_table.item(row, column)
-        if item is None:
-            item = QTableWidgetItem()
-            self.queue_table.setItem(row, column, item)
-        item.setText(text)
-
     def _on_worker_progress(self, job_id: int, percent: float) -> None:
-        self._set_row_text(job_id, _COL_PROGRESS, f"{percent:.0f}%")
+        key = self._job_keys.get(job_id)
+        if key is None:
+            return
+        self.queue_grid.update_item(key, meta=f"downloading · {percent:.0f}%")
 
     def _on_worker_status_changed(self, job_id: int, status: str) -> None:
         # No output_path here by design: the "done" status_changed emission
@@ -147,7 +153,9 @@ class DownloadTab(QWidget):
         # COALESCE(?, output_path) means this call never clobbers a path
         # already written by the `job_finished` handler below.
         queue_db.update_status(self.db_conn, job_id, status)
-        self._set_row_text(job_id, _COL_STATUS, status)
+        key = self._job_keys.get(job_id)
+        if key is not None:
+            self.queue_grid.update_item(key, status=status, meta=status)
 
     def _on_worker_finished(self, job_id: int, output_path: str) -> None:
         queue_db.update_status(self.db_conn, job_id, "done", output_path=output_path)
@@ -155,5 +163,7 @@ class DownloadTab(QWidget):
 
     def _on_worker_failed(self, job_id: int, message: str) -> None:
         queue_db.update_status(self.db_conn, job_id, "failed", error_message=message)
-        self._set_row_text(job_id, _COL_STATUS, "failed")
+        key = self._job_keys.get(job_id)
+        if key is not None:
+            self.queue_grid.update_item(key, status="failed", meta="failed", error=message)
         self._workers.pop(job_id, None)

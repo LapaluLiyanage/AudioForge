@@ -1,6 +1,5 @@
 from unittest.mock import MagicMock, patch
 
-from audioforge.ui.converter_tab import ConverterTab
 from audioforge.ui.main_window import MainWindow
 
 
@@ -10,12 +9,14 @@ def test_main_window_has_correct_title(qtbot):
     assert window.windowTitle() == "AudioForge"
 
 
-def test_main_window_has_convert_tab(qtbot):
+def test_main_window_has_download_and_converter_forms(qtbot):
     window = MainWindow()
     qtbot.addWidget(window)
 
-    assert window.tabs.tabText(1) == "Convert"
-    assert isinstance(window.converter_tab, ConverterTab)
+    assert window.download_tab is not None
+    assert window.converter_tab is not None
+    assert window.download_tab.queue_grid is window.queue_grid
+    assert window.converter_tab.queue_grid is window.queue_grid
 
 
 @patch("audioforge.ui.main_window.SettingsDialog")
@@ -29,6 +30,21 @@ def test_settings_action_opens_settings_dialog(mock_dialog_cls, qtbot):
 
     mock_dialog_cls.assert_called_once()
     mock_dialog.exec.assert_called_once()
+
+
+def test_status_pill_reflects_active_queue_items(qtbot):
+    window = MainWindow()
+    qtbot.addWidget(window)
+
+    assert window.status_pill.text() == "Idle"
+
+    window.queue_grid.add_item("dl:1", title="a", meta="m", status="downloading")
+
+    assert window.status_pill.text() == "Converting"
+
+    window.queue_grid.update_item("dl:1", status="done")
+
+    assert window.status_pill.text() == "Idle"
 
 
 def test_close_event_shuts_down_workers_and_closes_db(qtbot):
